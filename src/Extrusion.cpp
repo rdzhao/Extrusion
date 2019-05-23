@@ -8,12 +8,15 @@ void Extrusion::readData(string fn)
 	while (getline(file, str)) {
 		stringstream ss(str);
 
+		int idx;
 		float x, y, z;
 		float r, g, b;
 
+		ss >> idx;
 		ss >> x >> y >> z;
 		ss >> r >> g >> b;
 
+		_indices.push_back(idx);
 		_polyline.push_back(vec3(x, y, z));
 		_colors.push_back(vec3(r, g, b));
 
@@ -51,18 +54,90 @@ void Extrusion::writeOBJ()
 	}
 }
 
+void Extrusion::writePLY()
+{
+	std::ofstream out("CrossSection.ply");
+	// formating ply files
+	out << "ply" << std::endl;
+	out << "format ascii 1.0" << std::endl;
+	out << "element vertex " << _vertices.size() << std::endl;
+	out << "property float32 x" << std::endl;
+	out << "property float32 y" << std::endl;
+	out << "property float32 z" << std::endl;
+	out << "property uchar red" << std::endl;
+	out << "property uchar green" << std::endl;
+	out << "property uchar blue" << std::endl;
+	out << "element face " << _facets.size() << std::endl;
+	out << "property list uchar int vertex_index" << std::endl;
+	out << "end_header" << std::endl;
+	// data
+	for (int i = 0; i < _vertices.size(); ++i) {
+		out << _vertices[i].x << " "
+			<< _vertices[i].y << " "
+			<< _vertices[i].z << " "
+			<< _tubeColors[i].x << " "
+			<< _tubeColors[i].y << " "
+			<< _tubeColors[i].z << " "
+			<< std::endl;
+	}
+	for (int i = 0; i < _facets.size(); ++i) {
+		out << "3 "
+			<< _facets[i].x << " "
+			<< _facets[i].y << " "
+			<< _facets[i].z << std::endl;
+	}
+}
+
 void Extrusion::computeTube()
 {
-	computeDisplacement();
-	computeVertices();
-	assembleFacets();
+	_currentIdx = 0;
+	_currentVertexNum = 0;
+	while (_currentIdx < _polyline.size()) {
+		assembleTmpData();
+		computeDisplacement();
+		computeVertices();
+		assembleFacets();
+		addArrowHead();
+	}
+}
+
+void Extrusion::assembleTmpData()
+{
+	// clear
+	_tmpPolyline.clear();
+	_tmpColors.clear();
+	_displacement.clear();
+
+	// assemble
+	int cTag = _indices[_currentIdx];
+	/*while (_indices[_currentIdx] == cTag) {
+		_tmpPolyline.push_back(_polyline[_currentIdx]);
+		_tmpColors.push_back(_colors[_currentIdx]);
+
+		++_currentIdx;
+	}*/
+	while (1) {
+		if (_currentIdx == _polyline.size())
+			break;
+
+		if (_indices[_currentIdx] == cTag) {
+			_tmpPolyline.push_back(_polyline[_currentIdx]);
+			_tmpColors.push_back(_colors[_currentIdx]);
+
+			++_currentIdx;
+		}
+		else {
+			break;
+		}
+	}
+
 }
 
 void Extrusion::computeDisplacement()
 {
-	for (int i = 0; i < _polyline.size() - 1; ++i) {
+	for (int i = 0; i < _tmpPolyline.size() - 1; ++i) {
 		if (i == 0) { // set first one
-			vec3 v = _polyline[i + 1] - _polyline[i];
+			vec3 v = _tmpPolyline[i + 1] - _tmpPolyline[i];
 			vec3 n;
 			setVerticalVector(v, n);
 
@@ -70,14 +145,14 @@ void Extrusion::computeDisplacement()
 			//cout << n.x<<" " << n.y << " " << n.z << endl;
 		}
 		else { // parallel transport the rest
-			vec3 v1 = _polyline[i] - _polyline[i-1];
-			vec3 v2 = _polyline[i + 1] - _polyline[i];
+			vec3 v1 = _tmpPolyline[i] - _tmpPolyline[i-1];
+			vec3 v2 = _tmpPolyline[i + 1] - _tmpPolyline[i];
 			vec3 n1 = _displacement[i - 1];
 			vec3 n2;
 			parallelTransport(v1, v2, n1, n2);
 
 			_displacement.push_back(n2);
-			cout << n2.x<<" " << n2.y << " " << n2.z << endl;
+			//cout << n2.x<<" " << n2.y << " " << n2.z << endl;
 		}
 
 	}
@@ -141,28 +216,34 @@ void Extrusion::rotate(vec3 axis, vec3 n1, float theta, vec3& n2)
 
 void Extrusion::computeVertices()
 {
+	_tmpVertexNum = 0;
+
 	float theta = 2 * PI / _resolution;
 
-	for (int i = 0; i < _polyline.size(); ++i) {
+	for (int i = 0; i < _tmpPolyline.size(); ++i) {
 		if (i == 0) {
-			vec3 v = _polyline[i + 1] - _polyline[i];
+			vec3 v = _tmpPolyline[i + 1] - _tmpPolyline[i];
 			vec3 n = _displacement[0];
 
 			int k = 0;
 			do {
-				_vertices.push_back(_polyline[i] + _radius*n);
+				_vertices.push_back(_tmpPolyline[i] + _radius*n);
+				_tubeColors.push_back(_tmpColors[i]);
+				++_tmpVertexNum;
 
 				rotate(v, n, theta, n);
 				++k;
 			} while (k < _resolution);
 		}
-		else if (i == _polyline.size() - 1) {
-			vec3 v = _polyline[i] - _polyline[i - 1];
+		else if (i == _tmpPolyline.size() - 1) {
+			vec3 v = _tmpPolyline[i] - _tmpPolyline[i - 1];
 			vec3 n = _displacement[i - 1];
 
 			int k = 0;
 			do {
-				_vertices.push_back(_polyline[i] + _radius * n);
+				_vertices.push_back(_tmpPolyline[i] + _radius * n);
+				_tubeColors.push_back(_tmpColors[i]);
+				++_tmpVertexNum;
 
 				rotate(v, n, theta, n);
 				++k;
@@ -170,8 +251,8 @@ void Extrusion::computeVertices()
 		}
 		else
 		{
-			vec3 v1 = _polyline[i] - _polyline[i - 1];
-			vec3 v2 = _polyline[i + 1] - _polyline[i];
+			vec3 v1 = _tmpPolyline[i] - _tmpPolyline[i - 1];
+			vec3 v2 = _tmpPolyline[i + 1] - _tmpPolyline[i];
 			vec3 n1 = _displacement[i - 1];
 			vec3 n2 = _displacement[i];
 
@@ -179,7 +260,9 @@ void Extrusion::computeVertices()
 			do {
 				vec3 n = n1 + n2;
 				n /= sqrt(dot(n, n));
-				_vertices.push_back(_polyline[i] + _radius * n);
+				_vertices.push_back(_tmpPolyline[i] + _radius * n);
+				_tubeColors.push_back(_tmpColors[i]);
+				++_tmpVertexNum;
 
 				rotate(v1, n1, theta, n1);
 				rotate(v2, n2, theta, n2);
@@ -194,30 +277,90 @@ void Extrusion::computeVertices()
 	//}
 
 	// two end vertices;
-	_vertices.push_back(_polyline[0]);
-	_vertices.push_back(_polyline[_polyline.size() - 1]);
+	_vertices.push_back(_tmpPolyline[0]);
+	_tubeColors.push_back(_tmpColors[0]);
+	++_tmpVertexNum;
+	_vertices.push_back(_tmpPolyline[_tmpPolyline.size() - 1]);
+	_tubeColors.push_back(_tmpColors[_tmpPolyline.size() - 1]);
+	++_tmpVertexNum;
 }
 
 void Extrusion::assembleFacets()
 {
-	for (int i = 0; i < _polyline.size() - 1; ++i) {
+	for (int i = 0; i < _tmpPolyline.size() - 1; ++i) {
 		for (int j = 0; j < _resolution; ++j) {
-			_facets.push_back(ivec3(i*_resolution + j,
-									i*_resolution + (j + 1) % _resolution,
-									(i + 1)*_resolution + (j + 1) % _resolution));
-			_facets.push_back(ivec3(i*_resolution + j,
-									(i + 1)*_resolution + (j + 1) % _resolution,
-									(i + 1)*_resolution + j));
+			_facets.push_back(ivec3(_currentVertexNum + i*_resolution + j,
+				_currentVertexNum + i*_resolution + (j + 1) % _resolution,
+				_currentVertexNum + (i + 1)*_resolution + (j + 1) % _resolution));
+			_facets.push_back(ivec3(_currentVertexNum + i*_resolution + j,
+				_currentVertexNum + (i + 1)*_resolution + (j + 1) % _resolution,
+				_currentVertexNum + (i + 1)*_resolution + j));
 		}
 	}
 
 	// two end facets
 	for (int i = 0; i < _resolution; ++i) {
-		_facets.push_back(ivec3(_polyline.size()*_resolution,
-								(i + 1) % _resolution,
-								i));
-		_facets.push_back(ivec3(_polyline.size()*_resolution + 1,
-								(_polyline.size() - 1)*_resolution + i,
-								(_polyline.size() - 1)*_resolution + (i + 1) % _resolution));
+		_facets.push_back(ivec3(_currentVertexNum + _tmpPolyline.size()*_resolution,
+			_currentVertexNum + (i + 1) % _resolution,
+			_currentVertexNum + i));	
 	}
+	for (int i = 0; i < _resolution; ++i) {
+		_facets.push_back(ivec3(_currentVertexNum + _tmpPolyline.size()*_resolution + 1,
+			_currentVertexNum + (_tmpPolyline.size() - 1)*_resolution + i,
+			_currentVertexNum + (_tmpPolyline.size() - 1)*_resolution + (i + 1) % _resolution));
+	}
+
+	_currentVertexNum += _tmpVertexNum;
+}
+
+void Extrusion::addArrowHead()
+{
+	// clear facets at end
+	for (int i = 0; i < _resolution; ++i) {
+		_facets.pop_back();
+	}
+
+	// add new vertices
+	vec3 ep = _vertices.back();
+	vec3 ec = _tubeColors.back();
+	_vertices.pop_back();
+	_tubeColors.pop_back();
+	
+	float theta = 2 * PI / _resolution;
+	int s = _tmpPolyline.size() - 1;
+	vec3 v = _tmpPolyline[s] - _tmpPolyline[s - 1];
+	v /= sqrt(dot(v, v));
+	vec3 n = _displacement[s-1];
+
+	int k = 0;
+	do {
+		_vertices.push_back(_tmpPolyline[s] + 3.0f * _radius * n);
+		_tubeColors.push_back(_tmpColors[s]);
+		//++_tmpVertexNum;
+
+		rotate(v, n, theta, n);
+		++k;
+	} while (k < _resolution);
+
+	_vertices.push_back(ep + 16.0f * _radius * v);
+	_tubeColors.push_back(ec);
+
+	// add new facets
+	_currentVertexNum -= 1;
+	for (int i = 0; i < _resolution; ++i) {
+		_facets.push_back(ivec3(_currentVertexNum + i,
+			_currentVertexNum + i - (_resolution + 1),
+			_currentVertexNum + (i + 1) % _resolution));
+		_facets.push_back(ivec3(_currentVertexNum + (i + 1) % _resolution,
+			_currentVertexNum + i - (_resolution + 1),
+			_currentVertexNum + (i + 1) % _resolution - (_resolution + 1)));
+	}
+
+	for (int i = 0; i < _resolution; ++i) {
+		_facets.push_back(ivec3(_currentVertexNum + i,
+			_currentVertexNum + (i + 1) % _resolution,
+			_currentVertexNum + (_resolution)));
+	}
+
+	_currentVertexNum += _resolution + 1;
 }

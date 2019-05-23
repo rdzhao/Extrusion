@@ -27,9 +27,11 @@ public:
 	void computeTube();
 
 private:
+	void assembleTmpData();
 	void computeDisplacement();
 	void computeVertices();
 	void assembleFacets(); 
+	void addArrowHead();
 
 	void setVerticalVector(vec3 v, vec3& n);
 	void parallelTransport(vec3 v1, vec3 v2, vec3 n1, vec3& n2);
@@ -38,11 +40,18 @@ private:
 	int _resolution;
 	float _radius;
 
+	vector<int> _indices;
 	vector<vec3> _polyline; // a series of points
-	vector<vec3> _colors; 
+	vector<vec3> _colors;
 
+	int _currentIdx;
+	int _currentVertexNum;
+	int _tmpVertexNum;
+	vector<vec3> _tmpPolyline;
+	vector<vec3> _tmpColors;
 	vector<vec3> _displacement; // line segment based
 
 	vector<vec3> _vertices;
+	vector<vec3> _tubeColors;
 	vector<ivec3> _facets;
 };
